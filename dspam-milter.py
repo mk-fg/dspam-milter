@@ -39,7 +39,8 @@ class MilterLogFilter(logging.Filter):
 
 class MilterDspam(Milter.Base):
 
-	def __init__(self):
+	def __init__(self, fail_pass=False):
+		self.fail_action = Milter.TEMPFAIL if not fail_pass else Milter.ACCEPT
 		self.state = 'ready' # ready, busy
 		self._log = MilterLogFilter.getLogger(Milter.uniqueID())
 
@@ -109,29 +110,31 @@ class MilterDspam(Milter.Base):
 		msg_src, msg_dst = self.src, self.rcpts
 		self._new_message()
 
-		cmd = ['dspamc', '--deliver', 'summary', '--user', 'dspam']
+		cmd = ['dspamc', '--deliver=summary', '--user', 'dspam']
 		if msg_dst: cmd.extend(['--rcpt-to', ' '.join(sorted(msg_dst))])
-		if msg_src: cmd.extend(['--mail-from', msg_src])
+		if msg_src: cmd.extend(['--mail-from={}'.format(msg_src)])
 		cmd_str = ' '.join(cmd)
 		self._log.debug( 'Processing message'
 			' (%s, %s B): %s', self.getsymval('i'), len(msg), cmd_str )
 
-		try: proc = Popen(cmd, stdout=PIPE, close_fds=True)
+		try: proc = Popen(cmd, stdin=PIPE, stdout=PIPE, close_fds=True)
 		except:
 			self._log.exception('Failed to start dspamc: %s', cmd_str)
-			return Milter.TEMPFAIL
+			return self.fail_action
+		proc.stdin.write(msg)
+		proc.stdin.close()
 		summary = proc.stdout.read().strip()
 		proc = proc.wait()
 		if proc:
 			self._log.error('dspamc process returned error code: %s', proc)
-			return Milter.TEMPFAIL
+			return self.fail_action
 		if not summary.startswith('X-DSPAM-Result: '):
 			self._log.error('dspamc summary format error: %r', summary)
-			return Milter.TEMPFAIL
+			return self.fail_action
 
 		self._log.debug('dspamc summary: %s', summary)
 		name, val = summary.split(':', 1)
-		self.addheader(name.strip(), val.strip())
+		self.addheader(name.strip(), val.strip(), 0)
 		return Milter.ACCEPT
 
 
@@ -148,6 +151,9 @@ def main(args=None):
 		type=float, default=600, metavar='seconds',
 		help='Number of seconds the MTA should wait'
 			' for a response before considering this milter dead (default: %(default)s).')
+	parser.add_argument('--dspam-fail-pass', action='store_true',
+		help='Accept mails instead of returning TEMPFAIL'
+			' if dspamc returns any kind of errors instead of filtering results.')
 	parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
 	opts = parser.parse_args(sys.argv[1:] if args is None else args)
 
