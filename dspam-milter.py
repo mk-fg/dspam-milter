@@ -39,7 +39,8 @@ class MilterLogFilter(logging.Filter):
 
 class MilterDspam(Milter.Base):
 
-	def __init__(self, fail_pass=False):
+	def __init__(self, user, fail_pass=False):
+		self.user = user
 		self.fail_action = Milter.TEMPFAIL if not fail_pass else Milter.ACCEPT
 		self.state = 'ready' # ready, busy
 		self._log = MilterLogFilter.getLogger(Milter.uniqueID())
@@ -110,7 +111,8 @@ class MilterDspam(Milter.Base):
 		msg_src, msg_dst = self.src, self.rcpts
 		self._new_message()
 
-		cmd = ['dspamc', '--deliver=summary', '--user', 'dspam']
+		cmd = ['dspamc', '--deliver=summary']
+		if self.user: cmd.extend(['--user', self.user])
 		if msg_dst: cmd.extend(['--rcpt-to', ' '.join(sorted(msg_dst))])
 		if msg_src: cmd.extend(['--mail-from={}'.format(msg_src)])
 		cmd_str = ' '.join(cmd)
@@ -147,6 +149,11 @@ def main(args=None):
 		nargs='?', default='local:/tmp/dspam_milter.sock',
 		help='libmilter-format socket spec to listen on (default: %(default)s).'
 			' Examples: local:/tmp/dspam_milter.sock, inet:1234@localhost, inet6:1234@localhost')
+	parser.add_argument('-u', '--user',
+		metavar='name', default='dspam',
+		help='--user parameter to pass argument to dspam client (default: %(default)s).'
+			' dspam-recognized group names can be passed here as well.'
+			' Affects spam classification groups and permissions. Empty - dont pass.')
 	parser.add_argument('-t', '--timeout',
 		type=float, default=600, metavar='seconds',
 		help='Number of seconds the MTA should wait'
@@ -165,7 +172,8 @@ def main(args=None):
 	# pymilter uses stdout for spam, no logging should go there anyway
 	sys.stdout = open(os.devnull, 'w')
 
-	Milter.factory = MilterDspam
+	Milter.factory = ft.partial( MilterDspam,
+		opts.user, fail_pass=opts.dspam_fail_pass )
 	log.debug('Starting libmilter loop...')
 	Milter.runmilter('DspamMilter', opts.socket, opts.timeout)
 	log.debug('libmilter loop stopped')
