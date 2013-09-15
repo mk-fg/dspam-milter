@@ -77,16 +77,16 @@ class MilterDspam(Milter.Base):
 		return match.group(1) if match else addr
 
 	@Milter.noreply
-	def envfrom(self, addr):
+	def envfrom(self, addr, *params):
 		self.src = self._addr_filter(addr)
-		self._log.debug('Got FROM: %r', self.src)
+		self._log.debug('Got FROM: %r %r', self.src, params)
 		return Milter.CONTINUE
 
 	@Milter.noreply
-	def envrcpt(self, addr):
+	def envrcpt(self, addr, *params):
 		rcpt = self._addr_filter(addr)
 		self.rcpts.add(rcpt)
-		self._log.debug('Got RCPT: %r', rcpt)
+		self._log.debug('Got RCPT: %r %r', rcpt, params)
 		return Milter.CONTINUE
 
 	@Milter.noreply
