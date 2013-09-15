@@ -29,25 +29,26 @@ e.g. 1k lines of [pydspam](https://github.com/whyscream/pydspam)).
 Usage
 --------------------
 
-See `dspam-milter.py -h` output for the list of CLI options:
+Start the milter (--debug flag makes it more noisy):
 
-	usage: dspam-milter.py [-h] [-t seconds] [--debug] [socket]
+	./dspam-milter.py --debug local:/tmp/dspam_milter.sock
 
-	Ad-hoc dspam milter that does --deliver=summary and only adds result as
-	header, never rejecting or dropping messages.
+Add milter to postix configuration (main.cf):
 
-	positional arguments:
-	  socket                libmilter-format socket spec to listen on (default:
-	                        local:/tmp/dspam_milter.sock). Examples:
-	                        local:/tmp/dspam_milter.sock, inet:1234@localhost,
-	                        inet6:1234@localhost
+	smtpd_milters = unix:/tmp/dspam_milter.sock
+	non_smtpd_milters = unix:/tmp/dspam_milter.sock
 
-	optional arguments:
-	  -h, --help            show this help message and exit
-	  -t seconds, --timeout seconds
-	                        Number of seconds the MTA should wait for a response
-	                        before considering this milter dead (default: 600).
-	  --debug               Verbose operation mode.
+Start dspam daemon and send reload signal to postfix daemon:
 
-Expected to be run from modern init like systemd, upstart, runit or whatever
+	systemctl start dspam
+	systemctl reload postfix
+
+Done!
+
+Naturally, make sure milter socket, its umask and permissions are set correctly
+and postfix (or other MTA) can access it, but nothing else can.
+
+See `dspam-milter.py -h` output for the list of additional CLI options.
+
+Expected to be started from modern init like systemd, upstart, runit or whatever
 other process manager.
