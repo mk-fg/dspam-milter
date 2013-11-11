@@ -116,7 +116,7 @@ def dspamc( msg_path, tag, train=False,
 		user=None, msg_src=None, msg_dst=None, retrain=False,
 		_tag_ids=dict(
 			spam=({'Spam', 'Blacklisted'}, 'spam'),
-			ham=({'Innocent', 'Whitelisted'}, 'ham')) ):
+			ham=({'Innocent', 'Whitelisted'}, 'innocent')) ):
 	'Returns dspam summary header value or force-trains dspam on class mismatch.'
 	assert not tag or tag in ['spam', 'ham'], tag
 
@@ -248,25 +248,40 @@ def main(args=None):
 		if not (opts.test or opts.train) else None
 	folders = list(('spam', p) for p in opts.spam_folder)\
 		+ list(('ham', p) for p in opts.ham_folder)
+	corpus = dict(spam=set(), ham=set()) if opts.test or opts.train else None
 
 	for tag, path in folders:
 		for msg_path in path_process(
 				box_path(box, path), seen_only=not opts.ignore_flags,
 				ts_min=ts_min, ts_max=ts_max, size_max=size_max ):
-
 			if index: index.write('{} {}\n'.format(tag, msg_path))
-
-			if opts.test or opts.train:
-				try: mismatch = dspamc(msg_path, tag, train=bool(opts.train), user=opts.user)
-				except DSpamError as err:
-					log.error(err.message)
-					continue
-				if mismatch and opts.test:
-					print('Mismatch (expected: {}): {}'.format(tag, mismatch))
-
+			if corpus: corpus[tag].add(msg_path)
 	if index:
 		index.close()
 		if not opts.index_file: print(index.name)
+
+	if corpus:
+		def key_balancer():
+			'Tries to spread "spam" msgs evenly over "ham" and vice-versa.'
+			switch, keys = False, ['ham', 'spam']
+			while True:
+				yield keys[switch]
+				others = len(corpus[keys[not switch]])
+				if others == 0: continue
+				# How many more messages of this type to throw in, if there's more of them
+				balance = int(round(max(len(corpus[keys[switch]]) / others, 0), 0))
+				for i in xrange(balance): yield keys[switch]
+				switch = not switch
+		keys = key_balancer()
+		while any(corpus.values()):
+			tag = next(keys)
+			msg_path = corpus[tag].pop()
+			try: mismatch = dspamc(msg_path, tag, train=opts.train, user=opts.user)
+			except DSpamError as err:
+				log.error(err.message)
+				continue
+			if mismatch and opts.test:
+				print('Mismatch (expected: {}): {}'.format(tag, mismatch))
 
 
 if __name__ == '__main__': sys.exit(main())

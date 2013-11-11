@@ -52,3 +52,26 @@ See `dspam-milter.py -h` output for the list of additional CLI options.
 
 Expected to be started from modern init like systemd, upstart, runit or whatever
 other process manager.
+
+
+Extra tools
+--------------------
+
+I use these for dspam setup maintenance.
+
+### dspam-train.py
+
+Same as perl dspam_train (with --train option), but can navigate maildir paths
+to source several folders there as spam/ham, checking for message flags and
+timestamps to avoid processing too recent (since user weren't able to override
+verdict yet) or too old (to lessen load for large mailboxes) messages.
+
+Also allows to test ham/spam folders for verdict mismatches without forcing
+dspam training (--test option).
+
+Without --test or --train options, just builds index for stock dspam_train
+script's "-i" option (list of "[spam/ham] [filename]" lines), manual inspection
+or whatever other training module.
+
+See `dspam-train.py --help` for more detailed list of options and operation
+modes.
