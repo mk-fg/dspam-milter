@@ -200,10 +200,10 @@ def main(args=None):
 				' or proper (dot-separated) maildir subdir names ("reports.cron", "Sent", "lists.crypto").'
 			' Root (INBOX) path can be specified'
 				' as an empty string (""), single dot (".") or slash ("/").'
-			' Can be specified multiple times.')
+			' Can be specified multiple times. Any missing path(s) will raise errors.')
 	parser.add_argument('-r', '--ham-folder', action='append', default=list(),
 		help='Folder where generic non-spam (desirable) messages are stored.'
-			' Same path syntax as for --spam-folder apply. Can be specified multiple times.')
+			' Same notes on paths as for --spam-folder apply. Can be specified multiple times.')
 
 	parser.add_argument('-t', '--ts-max', default='5d', metavar='ts_spec',
 		help='How old (at least) message has'
