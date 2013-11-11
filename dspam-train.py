@@ -80,6 +80,7 @@ def path_process(path, seen_only=True, ts_min=None, ts_max=None, size_max=None):
 		if not isdir(path_dir): continue
 
 		for msg in os.listdir(path_dir):
+			if msg.startswith('.'): continue
 			msg_path = join(path_dir, msg)
 			try:
 				msg_stat = os.stat(msg_path)
@@ -243,12 +244,12 @@ def main(args=None):
 	size_max = opts.size_max * 2**20 if opts.size_max > 0 else None
 	log.debug('Processing date range: %s - %s', ts_min, ts_max)
 
+	corpus = dict(spam=set(), ham=set()) if opts.test or opts.train else None
 	index = ( open(opts.index_file, 'w') if opts.index_file\
 			else tempfile.NamedTemporaryFile(delete=False) )\
-		if not (opts.test or opts.train) else None
+		if not corpus else None
 	folders = list(('spam', p) for p in opts.spam_folder)\
 		+ list(('ham', p) for p in opts.ham_folder)
-	corpus = dict(spam=set(), ham=set()) if opts.test or opts.train else None
 
 	for tag, path in folders:
 		for msg_path in path_process(
@@ -260,7 +261,10 @@ def main(args=None):
 		index.close()
 		if not opts.index_file: print(index.name)
 
+
 	if corpus:
+		log.debug('Processing corpus: %s ham, %s spam', len(corpus['ham']), len(corpus['spam']))
+
 		def key_balancer():
 			'Tries to spread "spam" msgs evenly over "ham" and vice-versa.'
 			switch, keys = False, ['ham', 'spam']
@@ -272,6 +276,7 @@ def main(args=None):
 				balance = int(round(max(len(corpus[keys[switch]]) / others, 0), 0))
 				for i in xrange(balance): yield keys[switch]
 				switch = not switch
+
 		keys = key_balancer()
 		while any(corpus.values()):
 			tag = next(keys)
@@ -281,7 +286,7 @@ def main(args=None):
 				log.error(err.message)
 				continue
 			if mismatch and opts.test:
-				print('Mismatch (expected: {}): {}'.format(tag, mismatch))
+				print('Mismatch (expected: {}, path: {}): {}'.format(tag, msg_path, mismatch))
 
 
 if __name__ == '__main__': sys.exit(main())
