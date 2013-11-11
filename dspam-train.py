@@ -257,10 +257,10 @@ def main(args=None):
 				ts_min=ts_min, ts_max=ts_max, size_max=size_max ):
 			if index: index.write('{} {}\n'.format(tag, msg_path))
 			if corpus: corpus[tag].add(msg_path)
+
 	if index:
 		index.close()
 		if not opts.index_file: print(index.name)
-
 
 	if corpus:
 		log.debug('Processing corpus: %s ham, %s spam', len(corpus['ham']), len(corpus['spam']))
