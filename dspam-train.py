@@ -167,7 +167,8 @@ def main(args=None):
 			' picking mails for it according to some specified criterias.')
 
 	parser.add_argument('maildir',
-		help='Path to maildir (mail storage format, not just any directory) to pick mails from.')
+		help='Path to maildir (maildir++'
+			' mail storage format, not just any directory) to pick mails from.')
 	parser.add_argument('index_file', nargs='?',
 		help='Path to generated index file. Will be overwritten, if already exists.'
 			' If not specified, file with unique name will be generated in TMPDIR'
