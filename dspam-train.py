@@ -97,15 +97,7 @@ def path_process(path, seen_only=True, ts_min=None, ts_max=None, size_max=None):
 				if 'S' not in flags: continue
 
 			if ts_min or ts_max:
-				ts = msg.split('.', 1)[0]
-				try:
-					ts = int(ts)
-					if not abs(msg_stat.st_mtime - ts) < 30 * 365 * 24 * 3600:
-						raise AssertionError('Sanity check failed')
-					ts = datetime.fromtimestamp(ts)
-				except (ValueError, AssertionError) as err:
-					log.warn('Failed to parse maildir message ts (%s): %s', err, msg_path)
-					continue
+				ts = datetime.fromtimestamp(msg_stat.st_mtime)
 				if (ts_max and ts > ts_max) or (ts_min and ts < ts_min): continue
 
 			yield msg_path
@@ -211,8 +203,8 @@ def main(args=None):
 			' Empty value or "-" can be specified disable check.'
 			' ts_spec can be short relative string like "12h", "3mo", "1y"'
 				' or whatever "date" command or "dateutil" module (if present in system) can parse.'
-			' Maildir timestamp in the filename is used - despite it being "should not"'
-				' to parse filenames per spec - not date from message headers or file mtimes.')
+			' Timestamp from message mtime is used, which should not change in general,'
+				' see http://wiki2.dovecot.org/MailboxFormat/Maildir#Usage_of_timestamps.')
 	parser.add_argument('--ts-min', default='6mo', metavar='ts_spec',
 		help='Dont include messages older than specified date (default: %(default)s).'
 			' Can generally be used to avoid feeding'
