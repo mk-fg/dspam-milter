@@ -128,10 +128,29 @@ def dspamc( msg_path, tag, train=False,
 	cmd_str = ' '.join(cmd)
 
 	proc = Popen(cmd, stdin=PIPE, stdout=PIPE, close_fds=True)
-	with open(msg_path) as src: shutil.copyfileobj(src, proc.stdin)
-	proc.stdin.close()
-	summary = proc.stdout.read().strip()
-	proc = proc.wait()
+	with open(msg_path) as src:
+		try:
+			shutil.copyfileobj(src, proc.stdin)
+		except IOError as err:
+			log.error('Failed to feed message (%s) to dspamc, retrying in debug mode: %s', msg_path, err)
+			src.seek(0)
+			print('----- dspamc output for: {} (start) -----'.format(msg_path), file=sys.stderr)
+			proc = Popen( cmd + ['--debug'], stdin=PIPE,
+				stdout=sys.stderr, stderr=sys.stderr, close_fds=True )
+			try: shutil.copyfileobj(src, proc.stdin)
+			except IOError: pass
+			else: err = None
+			proc.stdin.close()
+			proc = proc.wait()
+			print('----- dspamc output for: {} (end) -----'.format(msg_path), file=sys.stderr)
+			if not proc: proc = '0, but stdin pipe failed' # make sure to raise DSpamError
+			if not err:
+				log.warn( 'Dspamc with --debug worked'
+					' while previous invocation failed for: %s', msg_path )
+		else:
+			proc.stdin.close()
+			summary = proc.stdout.read().strip()
+			proc = proc.wait()
 	if proc:
 		raise DSpamError(( 'dspamc command ({}) returned'
 			' error code ({}), message: {}' ).format(cmd_str, proc, msg_path))
