@@ -206,7 +206,7 @@ def main(args=None):
 				' or whatever "date" command or "dateutil" module (if present in system) can parse.'
 			' Timestamp from message mtime is used, which should not change in general,'
 				' see http://wiki2.dovecot.org/MailboxFormat/Maildir#Usage_of_timestamps.')
-	parser.add_argument('--ts-min', default='6mo', metavar='ts_spec',
+	parser.add_argument('--ts-min', default='12mo', metavar='ts_spec',
 		help='Dont include messages older than specified date (default: %(default)s).'
 			' Can generally be used to avoid feeding'
 				' too much data (i.e. mails for last 20 years) to dspam.'
