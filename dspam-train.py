@@ -6,7 +6,7 @@ import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE
 from os.path import normpath, join, isdir
 from datetime import datetime, timedelta
-import os, sys, re, mailbox, stat, tempfile, shutil
+import os, sys, re, mailbox, stat, tempfile, shutil, errno, signal
 
 
 try: from dateutil import parser as dateutil_parser
@@ -105,8 +105,8 @@ def path_process(path, seen_only=True, ts_min=None, ts_max=None, size_max=None):
 
 class DSpamError(Exception): pass
 
-def dspamc( msg_path, tag, train=False,
-		user=None, msg_src=None, msg_dst=None, retrain=False,
+def dspamc( msg_path, tag, train=False, user=None,
+		msg_src=None, msg_dst=None, retrain=False, timeout=300,
 		_tag_ids=dict(
 			spam=({'Spam', 'Blacklisted'}, 'spam'),
 			ham=({'Innocent', 'Whitelisted'}, 'innocent')) ):
@@ -127,30 +127,18 @@ def dspamc( msg_path, tag, train=False,
 			'--signature={}'.format(retrain) ])
 	cmd_str = ' '.join(cmd)
 
-	proc = Popen(cmd, stdin=PIPE, stdout=PIPE, close_fds=True)
-	with open(msg_path) as src:
-		try:
-			shutil.copyfileobj(src, proc.stdin)
-		except IOError as err:
-			log.error('Failed to feed message (%s) to dspamc, retrying in debug mode: %s', msg_path, err)
-			src.seek(0)
-			print('----- dspamc output for: {} (start) -----'.format(msg_path), file=sys.stderr)
-			proc = Popen( cmd + ['--debug'], stdin=PIPE,
-				stdout=sys.stderr, stderr=sys.stderr, close_fds=True )
+	signal.alarm(timeout)
+	try:
+		proc = Popen(cmd, stdin=PIPE, stdout=PIPE, close_fds=True)
+		with open(msg_path) as src:
 			try: shutil.copyfileobj(src, proc.stdin)
-			except IOError: pass
-			else: err = None
-			proc.stdin.close()
-			proc = proc.wait()
-			print('----- dspamc output for: {} (end) -----'.format(msg_path), file=sys.stderr)
-			if not proc: proc = '0, but stdin pipe failed' # make sure to raise DSpamError
-			if not err:
-				log.warn( 'Dspamc with --debug worked'
-					' while previous invocation failed for: %s', msg_path )
-		else:
+			except IOError as err: # dspam sometimes closes stdin before reading whole msg
+				if err.errno != errno.EPIPE: raise
 			proc.stdin.close()
 			summary = proc.stdout.read().strip()
 			proc = proc.wait()
+	finally: signal.alarm(0)
+
 	if proc:
 		raise DSpamError(( 'dspamc command ({}) returned'
 			' error code ({}), message: {}' ).format(cmd_str, proc, msg_path))
@@ -174,7 +162,7 @@ def dspamc( msg_path, tag, train=False,
 		msg_sig = re.search(r'\bsignature=(\S+)', val)
 		if not msg_sig: raise res_error('missing class')
 		msg_sig = msg_sig.group(1)
-		dspamc(msg_path, tag, user=user, retrain=msg_sig)
+		dspamc(msg_path, tag, user=user, timeout=timeout, retrain=msg_sig)
 	return val.strip()
 
 
@@ -204,6 +192,10 @@ def main(args=None):
 				' to dspam client (default: %(default)s), used for --test or --train options.'
 			' dspam-recognized group names can be passed here as well.'
 			' Affects spam classification groups and permissions. Empty - dont pass.')
+	parser.add_argument('--dspamc-timeout',
+		type=float, default=300, metavar='seconds',
+		help='Timeout for individual dspamc command (for processing single message)'
+			' - will stop script with error if triggered (default: %(default)ss).')
 
 	parser.add_argument('-s', '--spam-folder', action='append', default=list(),
 		help='Folder where genuine spam mails end up.'
@@ -293,7 +285,9 @@ def main(args=None):
 		while any(corpus.values()):
 			tag = next(keys)
 			msg_path = corpus[tag].pop()
-			try: mismatch = dspamc(msg_path, tag, train=opts.train, user=opts.user)
+			try:
+				mismatch = dspamc( msg_path, tag,
+					train=opts.train, user=opts.user, timeout=opts.dspamc_timeout )
 			except DSpamError as err:
 				log.error(err.message)
 				continue
