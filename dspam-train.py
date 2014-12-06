@@ -6,6 +6,7 @@ import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE
 from os.path import normpath, join, isdir
 from datetime import datetime, timedelta
+from time import time, sleep
 import os, sys, re, mailbox, stat, tempfile, shutil, errno, signal
 
 
@@ -104,9 +105,17 @@ def path_process(path, seen_only=True, ts_min=None, ts_max=None, size_max=None):
 
 
 class DSpamError(Exception): pass
+class DSpamErrorFatal(DSpamError): pass
+
+def dspamc_retry_delay(val_start=0.5, val_max=10, k=2):
+	val = val_start
+	while True:
+		yield val
+		val = min(val * k, val_max)
 
 def dspamc( msg_path, tag, train=False, user=None,
-		msg_src=None, msg_dst=None, retrain=False, timeout=300,
+		msg_src=None, msg_dst=None, retrain=False,
+		timeout=300, timeout_dspamd=600,
 		_tag_ids=dict(
 			spam=({'Spam', 'Blacklisted'}, 'spam'),
 			ham=({'Innocent', 'Whitelisted'}, 'innocent')) ):
@@ -127,17 +136,33 @@ def dspamc( msg_path, tag, train=False, user=None,
 			'--signature={}'.format(retrain) ])
 	cmd_str = ' '.join(cmd)
 
-	signal.alarm(timeout)
-	try:
-		proc = Popen(cmd, stdin=PIPE, stdout=PIPE, close_fds=True)
-		with open(msg_path) as src:
-			try: shutil.copyfileobj(src, proc.stdin)
-			except IOError as err: # dspam sometimes closes stdin before reading whole msg
-				if err.errno != errno.EPIPE: raise
-			proc.stdin.close()
-			summary = proc.stdout.read().strip()
-			proc = proc.wait()
-	finally: signal.alarm(0)
+	connect_deadline = timeout_dspamd\
+		if timeout_dspamd <= 0 else (time() + timeout_dspamd)
+	connect_delay = dspamc_retry_delay()
+	while True:
+		signal.alarm(timeout)
+		try:
+			proc = Popen(cmd, stdin=PIPE, stdout=PIPE, close_fds=True)
+			with open(msg_path) as src:
+				try: shutil.copyfileobj(src, proc.stdin)
+				except IOError as err: # dspam sometimes closes stdin before reading whole msg
+					if err.errno != errno.EPIPE: raise
+				proc.stdin.close()
+				summary = proc.stdout.read().strip()
+				proc = proc.wait()
+		finally: signal.alarm(0)
+		if proc == 251: # special case of "unable to connect to dspamd"
+			if connect_deadline < 0:
+				raise DSpamErrorFatal(( 'dspamc command ({}) returned error code 251'
+						' ("failed to connect to dspamd"), message: {}' ).format(cmd_str, msg_path))
+			elif connect_deadline > 0:
+				if time() > connect_deadline:
+					raise DSpamErrorFatal(( 'timed-out ({}s) waiting for dspamd connection'
+						' (dspamc command: {}), message: {}' ).format(timeout_dspamd, cmd_str, msg_path))
+				sleep(next(connect_delay))
+				continue
+			# connect_deadline == 0 case is "treat it like any other error"
+		break
 
 	if proc:
 		raise DSpamError(( 'dspamc command ({}) returned'
@@ -196,6 +221,17 @@ def main(args=None):
 		type=float, default=300, metavar='seconds',
 		help='Timeout for individual dspamc command (for processing single message)'
 			' - will stop script with error if triggered (default: %(default)ss).')
+	parser.add_argument('--dspamc-connect-timeout',
+		type=float, default=600, metavar='seconds',
+		help='When there is no dspamd process listening'
+				' or dspamc is unable to connect to one, it returns code 251.'
+			' By default, when getting that code from dspamc, script will retry'
+				' every few seconds until amount of time specified by this parameter'
+				' passes (default: %(default)ss), then exits with error.'
+			' Zero (0) can be specified to disable this behavior completely - just report'
+				' dspamc error and move on to the next message.'
+			' Negative number (e.g. -1) will make'
+				' script exit when first such error returned from dspamc.')
 
 	parser.add_argument('-s', '--spam-folder', action='append', default=list(),
 		help='Folder where genuine spam mails end up.'
@@ -287,10 +323,15 @@ def main(args=None):
 			msg_path = corpus[tag].pop()
 			try:
 				mismatch = dspamc( msg_path, tag,
-					train=opts.train, user=opts.user, timeout=opts.dspamc_timeout )
+					train=opts.train, user=opts.user, timeout=opts.dspamc_timeout,
+					timeout_dspamd=opts.dspamc_connect_timeout )
 			except DSpamError as err:
-				log.error(err.message)
-				continue
+				if not isinstance(err, DSpamErrorFatal):
+					log.error(err.message)
+					continue
+				else:
+					log.fatal(err.message)
+					return 1
 			if mismatch and opts.test:
 				print('Mismatch (expected: {}, path: {}): {}'.format(tag, msg_path, mismatch))
 
