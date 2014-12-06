@@ -7,7 +7,7 @@ import Milter
 import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE
 from lya import AttrDict
-import os, sys, re, logging, signal
+import os, sys, re, logging, signal, time
 
 
 class MilterLogFilter(logging.Filter):
@@ -39,11 +39,39 @@ class MilterLogFilter(logging.Filter):
 
 class MilterDspam(Milter.Base):
 
+	dspamc_proc_wait = 0.5 # seconds to wait for dspamc to exit
+	dspamc_proc_wait_checks = 8
+	dspamc_proc_timeout = 5 * 60 # terminate dspamc pid after 5min
+	dspamc_proc_timeout_kill = 20 # seconds before sending kill signal if pid fails to terminate
+
 	def __init__(self, user, fail_pass=False):
 		self.user = user
 		self.fail_action = Milter.TEMPFAIL if not fail_pass else Milter.ACCEPT
 		self.state = 'ready' # ready, busy
+		self.dspamc_procs = dict()
 		self._log = MilterLogFilter.getLogger(Milter.uniqueID())
+
+	def dspamc_proc_gc(self, new_proc=None):
+		ts = time.time()
+		if new_proc:
+			self.dspamc_procs[new_proc.pid] = new_proc, ts
+		for pid, (proc, proc_ts) in self.dspamc_procs.items():
+			if proc.poll() is not None:
+				err = proc.wait()
+				if err: self._log.error('dspamc gc-ed process (pid: %s) returned error code: %s', pid, err)
+				del self.dspamc_procs[pid]
+			elif ts - proc_ts > self.dspamc_proc_timeout:
+				self._log.warn('dspamc gc-ed process (pid: %s) timed-out, terminating', pid)
+				proc.terminate()
+				checks = (int(self.dspamc_proc_timeout_kill) + 1) / 5.0
+				for n in xrange(checks):
+					err = proc.poll()
+					if err is not None or checks <= 0:
+						if err is not None: err = proc.wait()
+						break
+					time.sleep(self.dspamc_proc_timeout_kill / checks)
+				else: proc.kill()
+				del self.dspamc_procs[pid]
 
 
 	### Connections
@@ -125,11 +153,33 @@ class MilterDspam(Milter.Base):
 			return self.fail_action
 		proc.stdin.write(msg)
 		proc.stdin.close()
-		summary = proc.stdout.read().strip()
-		proc = proc.wait()
-		if proc:
-			self._log.error('dspamc process returned error code: %s', proc)
+
+		proc_terminated = False
+		summary = proc.stdout.readline().strip()
+
+		if summary == '250 2.6.0 <dspam> Message accepted for delivery: INNOCENT':
+			# Special case - happens when dspam gets huge message, dspamc hangs afterwards
+			self._log.debug( 'dspamc special-case: huge message'
+				' skip with "innocent" (src: %r, dst: %r)', msg_src, msg_dst )
+			summary = ( 'X-DSPAM-Result: dspam; result="Innocent";'
+				' class="Whitelisted"; probability=0.0000; confidence=1.00; signature=xxx' )
+			proc.terminate()
+			proc_terminated = True
+
+		for n in xrange(self.dspamc_proc_wait_checks):
+			err = proc.poll()
+			if err is not None or self.dspamc_proc_wait_checks <= 0:
+				if err is not None: err = proc.wait() if not proc_terminated else 0
+				break
+			time.sleep(self.dspamc_proc_wait / float(self.dspamc_proc_wait_checks))
+		if err:
+			self._log.error('dspamc process returned error code: %s', err)
 			return self.fail_action
+		else:
+			self._log.debug( 'dspamc pid exit timed-out (with'
+				' summary: %r), handing it off to dspamc_proc_gc: %s', summary, proc.pid )
+			self.dspamc_proc_gc(proc)
+
 		if not summary.startswith('X-DSPAM-Result: '):
 			self._log.error('dspamc summary format error: %r', summary)
 			return self.fail_action
