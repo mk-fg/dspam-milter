@@ -6,7 +6,6 @@ import Milter
 
 import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE
-from lya import AttrDict
 import os, sys, re, logging, signal, time
 
 
