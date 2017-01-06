@@ -43,8 +43,8 @@ class MilterDspam(Milter.Base):
 	dspamc_proc_timeout = 5 * 60 # terminate dspamc pid after 5min
 	dspamc_proc_timeout_kill = 20 # seconds before sending kill signal if pid fails to terminate
 
-	def __init__(self, user, fail_pass=False):
-		self.user = user
+	def __init__(self, user, fail_pass=False, dspamc_opts=None):
+		self.user, self.dspamc_opts = user, dspamc_opts or list()
 		self.fail_action = Milter.TEMPFAIL if not fail_pass else Milter.ACCEPT
 		self.state = 'ready' # ready, busy
 		self.dspamc_procs = dict()
@@ -142,6 +142,7 @@ class MilterDspam(Milter.Base):
 		if self.user: cmd.extend(['--user', self.user])
 		if msg_dst: cmd.extend(['--rcpt-to', ' '.join(sorted(msg_dst))])
 		if msg_src: cmd.extend(['--mail-from={}'.format(msg_src)])
+		cmd += self.dspamc_opts
 		cmd_str = ' '.join(cmd)
 		self._log.debug( 'Processing message'
 			' (%s, %s B): %s', self.getsymval('i'), len(msg), cmd_str )
@@ -210,6 +211,9 @@ def main(args=None):
 	parser.add_argument('--dspam-fail-pass', action='store_true',
 		help='Accept mails instead of returning TEMPFAIL'
 			' if dspamc returns any kind of errors instead of filtering results.')
+	parser.add_argument('--dspam-opts', action='append', metavar='options',
+		help='Extra options to pass to dspamc command.'
+			' Will be split on spaces, unless option is used multiple times.')
 	parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
 	opts = parser.parse_args(sys.argv[1:] if args is None else args)
 
@@ -221,8 +225,11 @@ def main(args=None):
 	# pymilter uses stdout for spam, no logging should go there anyway
 	sys.stdout = open(os.devnull, 'w')
 
-	Milter.factory = ft.partial( MilterDspam,
-		opts.user, fail_pass=opts.dspam_fail_pass )
+	dspamc_opts = opts.dspam_opts or list()
+	if len(dspamc_opts) == 1: dspamc_opts = dspamc_opts[0].strip().split()
+
+	Milter.factory = ft.partial( MilterDspam, opts.user,
+		fail_pass=opts.dspam_fail_pass, dspamc_opts=dspamc_opts )
 	log.debug('Starting libmilter loop...')
 	Milter.runmilter('DspamMilter', opts.socket, opts.timeout)
 	log.debug('libmilter loop stopped')
