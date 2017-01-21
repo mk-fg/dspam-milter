@@ -11,15 +11,15 @@ import os, sys, re, logging, signal, time
 
 class MilterLogFilter(logging.Filter):
 
-	milter_id_format = '{:04d}'
-	msg_format_default = '{} :: {}'
+	milter_id_format = '{0:04d}'
+	msg_format_default = '{0} :: {1}'
 	_msg_format_default = object()
 
 	@classmethod
 	def getLogger(cls, milter_id, ext='core', msg_format=_msg_format_default):
 		milter_id = cls.milter_id_format.format(milter_id)
 		assert milter_id
-		log = logging.getLogger('dspam_milter.{}.{}'.format(ext, milter_id))
+		log = logging.getLogger('dspam_milter.{0}.{1}'.format(ext, milter_id))
 		log.addFilter(cls(milter_id, msg_format))
 		return log
 
@@ -133,7 +133,7 @@ class MilterDspam(Milter.Base):
 
 	def eom(self):
 		msg = ''.join([
-			''.join('{}: {}\r\n'.format(k, v) for k, v in self.msg_headers),
+			''.join('{0}: {1}\r\n'.format(k, v) for k, v in self.msg_headers),
 			'\r\n', ''.join(self.msg) ])
 		msg_src, msg_dst = self.src, self.rcpts
 		self._new_message()
@@ -141,7 +141,7 @@ class MilterDspam(Milter.Base):
 		cmd = ['dspamc', '--deliver=summary']
 		if self.user: cmd.extend(['--user', self.user])
 		if msg_dst: cmd.extend(['--rcpt-to', ' '.join(sorted(msg_dst))])
-		if msg_src: cmd.extend(['--mail-from={}'.format(msg_src)])
+		if msg_src: cmd.extend(['--mail-from={0}'.format(msg_src)])
 		cmd += self.dspamc_opts
 		cmd_str = ' '.join(cmd)
 		self._log.debug( 'Processing message'
